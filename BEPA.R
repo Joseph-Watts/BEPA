@@ -312,12 +312,7 @@ strings_to_model_sets <- function(model_strings){
   #' ----
   #' Function to covert strings to fomula
   string2formula <- function(x){
-    
-    #' Cannot convert a single variable into a formula, so dropping any such instances.
-    #' This has to be addressed later, because these terms are still needed in the matrix,
-    #' otherwise errors are produced when trying to compare these models to models with
-    #' a different number of variables.
-    
+       
     #' If there are any isolated variables, they need to be redefined as a circular formula.
     #' This is how they need to be formatted for the phylopath::define_model_set function
     if(any(x == names(x))){
@@ -352,8 +347,8 @@ strings_to_model_sets <- function(model_strings){
   #list_model_formulae <- apply(model_strings, MARGIN = 1, string2formula)
   list_model_formulae <- list()
   
-  for(z in 1:nrow(model_strings)){
-    list_model_formulae[[z]] <- string2formula(model_strings[z,])
+  for(m in 1:nrow(model_strings)){
+    list_model_formulae[[m]] <- string2formula(model_strings[m,])
   }
   
   # List to become the list of model matrices
