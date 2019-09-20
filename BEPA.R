@@ -6,12 +6,15 @@
 #' 
 #' The BEPA package contains functions to help perform exploratory path analysis in R.
 #' As the name suggests, this is not done efficiently or elegantly.
-#' The package can be used to identify all possible path model structures, given a set of variables.
-#' All of these models can then be compared. 
-#' Time taken increases exponentially with the number of variables.
 #' 
-#' This package is written specifically for use with the phylopath package, which itself is based on the phyloglm and phylolm packages.
-#' The functions should also be useable for exploratory path analyses more generally, but this has not been tested.
+#' The package can be used to identify all possible path model structures, given a set of 
+#' variables. All of these models can then be compared. Time taken increases exponentially 
+#' with the number of variables.
+#' 
+#' This package is written specifically for use with the phylopath package, which itself 
+#' is based on the phyloglm and phylolm packages.
+#' The functions should also be useable for exploratory path analyses more generally, but 
+#' this has not been tested.
 #' 
 #' ------------------------------------------
 #' Working notes:
@@ -19,17 +22,26 @@
 #' 
 #' 2. The exclusion function could be made more general
 #' Would probably be good to be able to exclude a wider range of models in the future.
-#' For example, might want to exclude multiple predictors of a single variable, or require a variable to be predicted by others.
+#' For example, might want to exclude multiple predictors of a single variable, or 
+#' require a variable to be predicted by others.
 #' 
 #' 3. Need to look into parallel processing
-#' Currently there is a commented out piece of code that would parallelise the most time consuming 
-#' part of the script, but it wont work on Windows (mclapply doesnt run in parallel on Windows.)
+#' Currently there is a commented out piece of code that would parallelise the most 
+#' time consuming part of the script, but it won’t work on Windows (mclapply doesnt run 
+#' in parallel on Windows.)
 #' 
 #' 4. Need to look into how the run this with multiple trees.
 #' Maybe worth looking into creating a function to run multiple trees.
 #' 
 #' 5. The outputs of these function still need careful checking.
-#' Need to make sure that the get_all_models function is not missing any models that should be included.
+#' Need to make sure that the get_all_models function is not missing any models that 
+#' should be included.
+#' 
+#' 6. When a variable is not predicted by any other variables the get_all_models just 
+#' puts the variable name in the variable column. This makes it easier to identify,
+#' but cannot be directly converted into a formula. It might be worth representing such
+#' cases as predicted by themselves (e.g. "a ~ a") as this is how they are represented
+#' when converting to DAGs. Not sure.
 #' 
 #' ------------------------------------------
 require(phylopath)
@@ -45,17 +57,19 @@ require(plyr)
 #' ------------------------------------------
 #' get_all_models function
 #' 
-#' The get_all_models function generates a list of all possible acylic models, given a set of variables.
-#' This function returns a data.frame in which there is a column for each of the variables specified.
-#' The rows in this data.frame are 
-#' Using the "exclusions" argument, it is possible to exclude all models in which on variable is predicted by another.
+#' The get_all_models function generates a list of all possible acyclic models, 
+#' given a set of variables.
+#' This function returns a data.frame in which there is a column for each of the 
+#' variables specified. The entire rows in this data.frame represents a model.
+#' Using the "exclusions" argument it is possible to exclude all models in which 
+#' one variable is predicted by another.
 
 get_all_models <- function(variable_list, exclusions){
   
   #' ----------------
-  # Some basic checkes of the variables supplied
+  #' Some basic checks of the variables supplied
   
-  if(sum(duplicated(variable_list))>0){
+  if(sum(duplicated(variable_list)) > 0){
     stop("Each variable name must be unique")
     
   }else if(sum(grepl(" ", variable_list)) > 0){
@@ -69,9 +83,68 @@ get_all_models <- function(variable_list, exclusions){
   #' ----------------
   #' Defining sub-functions
   
+  #' ----
+  #' Function to reformat and tidy formulea text strings
   tidy_strings <- function(x){
     x_items <- strsplit(x, " ") %>% unlist()
     x_items[!x_items %in% c("~", "+")]
+  }
+  
+  #' ----
+  #' Function to test whether formulae contain circularity
+  model_filter <- function(formulae_list){
+    f <- formulae_list[ ! is.na(formulae_list)]
+    
+    tidy_strings <- function(x){
+      x_items <- strsplit(x, " ") %>% unlist()
+      x_items[!x_items %in% c("~", "+")]
+    }
+    
+    f_tidy <- lapply(f, tidy_strings)
+    
+    var_matrix <- data.frame(matrix(nrow = n_vars,
+                                    ncol = n_vars))
+    colnames(var_matrix) <- variable_list
+    row.names(var_matrix) <- variable_list
+    
+    var_matrix[,] <- 0
+    
+    for(f_i in 1:length(f_tidy)){
+      if(length(f_tidy[[f_i]]) > 1){
+        var_col <- f_tidy[[f_i]][1]
+        var_rows <- f_tidy[[f_i]][2:length(f_tidy[[f_i]])]
+        var_matrix[var_rows, var_col] <- 1 
+      }
+      
+    }
+    
+    # By default the function will output False
+    output <- F
+    
+    tryCatch({
+      
+      #' This is a bit of a hack, but uses the basiSet function in the ggm package 
+      #' to identify whether the var_matrix is acyclic (tests whether there is 
+      #' circularity in the predictor variable structure)
+      #' This function will fail when the matrix is not acyclic, and the tryCatch 
+      #' function is used to prevent this from stopping the function.
+      #' NOTE: If I wanted to develop this further, I could potentially find the 
+      #' source code the for basiSet function and adapt it for the current purposes. 
+      
+      f_test <- ggm::basiSet(as.matrix(var_matrix))
+      
+      if(length(f_test) > 1){
+        output <- T
+      }
+      
+    }, error=function(e){})
+    
+    #    }
+    
+    #' This outputs TRUE if the model is acyclic and FALSE if the model contains 
+    #' circularity.
+    output
+    
   }
   
   #' ----------------
@@ -89,24 +162,29 @@ get_all_models <- function(variable_list, exclusions){
   
   every_formulae <- list()
   
-  #' This loop goes through each variable in the variable_list and defines every possible combination of predictor variables
+  #' This loop goes through each variable in the variable_list and defines every 
+  #' possible combination of predictor variables
   for(i in 1:n_vars){
     
-    # Defining the response variable
+    #' Defining the response variable
     i_var <- variable_list[i]
     
-    # Creating a blank list, to contain every possible combination of predictor variables for the response variable
+    #' Creating a blank list, to contain every possible combination of predictor 
+    #' variables for the response variable
     i_formulae <- list()
     
-    # This loop goes through the list of combos and selects only those in which the response is not included (unless the response is the only variable).
+    #' This loop goes through the list of combos and selects only those in which 
+    #' the response is not included (unless the response is the only variable).
     for(j in 1:length(combos)){
       
-      #' Need to include the possibility that the variable is not predicted by any other variables.
+      #' Need to include the possibility that the variable is not predicted by any 
+      #' other variables.
       if(length(combos[[j]]) == 1 & sum(i_var == combos[[j]]) == 1){
         j_formula <- i_var 
         i_formulae <- c(i_formulae, j_formula)
         
-        #' This selects as predictors every combination of variables that do not include the response variable.   
+        #' This selects as predictors every combination of variables that do not 
+        #' include the response variable.   
       }else if(! i_var %in% combos[[j]]){
         j_formula <- paste0(i_var, " ~ ", paste0(unlist(combos[j]), collapse =  " + "))
         i_formulae <- c(i_formulae, j_formula)
@@ -144,8 +222,9 @@ get_all_models <- function(variable_list, exclusions){
           
           if(i_response == e_response & e_predictors %in% i_predictors){
             every_formulae_include[i] <- FALSE
-            #' Note, this will continue running through the list of exclusions, even if one has been met. 
-            #' Should probably jump to the end of the j and i iterations at this point
+            #' Note, this will continue running through the list of exclusions, 
+            #' even if one has been met. 
+            #' Should probably jump to the end of the j and i iterations at this point.
           }
           
         }
@@ -158,73 +237,17 @@ get_all_models <- function(variable_list, exclusions){
     
   }
   
-  # ------------
-  # Function to test whether the formulae is circular
-  
-  model_filter <- function(formulae_list){
-    f <- formulae_list[ ! is.na(formulae_list)]
-    
-    tidy_strings <- function(x){
-      x_items <- strsplit(x, " ") %>% unlist()
-      x_items[!x_items %in% c("~", "+")]
-    }
-    
-    f_tidy <- lapply(f, tidy_strings)
-    
-    var_matrix <- data.frame(matrix(nrow = n_vars,
-                                    ncol = n_vars))
-    colnames(var_matrix) <- variable_list
-    row.names(var_matrix) <- variable_list
-    
-    var_matrix[,] <- 0
-    
-    for(f_i in 1:length(f_tidy)){
-      if(length(f_tidy[[f_i]]) > 1){
-        var_col <- f_tidy[[f_i]][1]
-        var_rows <- f_tidy[[f_i]][2:length(f_tidy[[f_i]])]
-        var_matrix[var_rows, var_col] <- 1 
-      }
-      
-    }
-    
-    # By default the function will output False
-    output <- F
-    
-    # If the var_matric is entirely full of 0s, then this model will also be excluded.
-    # NOTE: THIS SHOULD ONLY BE APPLIED AT THE END
-    #if(sum(rowSums(var_matrix)) > 0){
-    
-    tryCatch({
-      
-      #' This is a bit of a hack, but uses the basiSet function in the ggm package to identify whether the var_matrix 
-      #' is acyclic (tests whether there is circularity in the predictor variable structure)
-      #' This function will fail when the matrix is not acyclic, and the tryCatch function is used to prevent this
-      #' from stopping the function.
-      #' NOTE: If I wanted to develop this further, I could potentially find the source code the for basiSet function
-      #' and adapt it for the current purposes. 
-      f_test <- ggm::basiSet(as.matrix(var_matrix))
-      
-      if(length(f_test) > 1){
-        output <- T
-      }
-      
-    }, error=function(e){})
-    
-    #    }
-    
-    # This outputs TRUE if the model is acyclic and FALSE if the model contains circularity.
-    output
-    
-  }
-  
-  # ------------
-  # Setting up the first variable combos
+  #' ------------
+  #' Setting up the first variable combos
   
   first_var_formulae <- every_formulae[grepl(paste0("^", variable_list[1]), every_formulae)] %>% 
     unlist()
+  
   all_formulae_combos <- data.frame(matrix(nrow = length(first_var_formulae), 
                                            ncol = n_vars))
+  
   all_formulae_combos[,1] <- first_var_formulae
+  
   colnames(all_formulae_combos) <- variable_list
   
   # Using a loop to identify all other usable path model structures
@@ -242,10 +265,10 @@ get_all_models <- function(variable_list, exclusions){
     # Duplicate each existing formulae by the number of formulae in which i_var is predicted
     all_formulae_combos <- all_formulae_combos[rep(1:n_rows_start, each = length(i_formulae)),]
     
-    
     all_formulae_combos[,i_var] <- rep(i_formulae, times = n_rows_start)
     
-    # This is the part of this loop that takes a while. Probably need to work out an efficient way to make this parallel.
+    #' This is the part of this loop that takes a while. 
+    #' Probably need to work out an efficient way to make this parallel.
     combos_to_include <- apply(all_formulae_combos, 1, model_filter)
     
     # This line below should parallelise the function, but won't work on Windows machines
@@ -255,8 +278,8 @@ get_all_models <- function(variable_list, exclusions){
     
   }
   
-  
-  # There should be one row in which no variables are predicted by any other variables. This needs to be dropped. 
+  #' There should be one row in which no variables are predicted by any other variables. 
+  #' This needs to be dropped. 
   r_index <- NULL
   
   for(r in 1:nrow(all_formulae_combos)){
@@ -265,6 +288,8 @@ get_all_models <- function(variable_list, exclusions){
   
   all_formulae_combos <- all_formulae_combos[r_index,]
   
+  row.names(all_formulae_combos) <- paste0("m", 1:nrow(all_formulae_combos))
+  
   all_formulae_combos
   
 }
@@ -272,46 +297,79 @@ get_all_models <- function(variable_list, exclusions){
 #' ------------------------------------------
 #' strings_to_model_sets function
 #' 
-#' This function converts the strings generated in the get_all_models function into 
+#' This function converts the strings generated in the get_all_models 
+#' function into matrices representing directed acyclic graphs (DAGs).
+#' Takes the whole data.frame as the input.
+#' 
+#' Requires the columns to be named after each variable, which should 
+#' be the case if the get_all_models function is used
 
-# Requires the columns to be named after each variable (should be)
-strings_to_model_sets <- function(list_model_strings){
+strings_to_model_sets <- function(model_strings){
   
-  variables <- colnames(list_model_strings)
-  
-  # Function to covert strings to fomula
+  #' ----------------
+  #' Defining sub-functions
+  #' 
+  #' ----
+  #' Function to covert strings to fomula
   string2formula <- function(x){
-    x[!x == names(x)] %>% 
-      as.list() %>%
-      lapply(as.formula)
-  }
-  
-  # Converting strings to formulae
-  list_model_formulae <- apply(list_model_strings, MARGIN = 1, string2formula)
-  
-  # List to become the list of model matricies
-  all_model_matricies <- list()
-  
-  for(i in 1:length(list_model_formulae)){
-    all_model_matricies[i] <- define_model_set(list_model_formulae[[i]])
-    # If there are variables missing from the matrix, add them in here.
-    if(nrow(all_model_matricies[i][[1]]) < length(variables)){
-      missing_variables <- variables[!variables %in% row.names(all_model_matricies[i][[1]])]
+    
+    #' Cannot convert a single variable into a formula, so dropping any such instances.
+    #' This has to be addressed later, because these terms are still needed in the matrix,
+    #' otherwise errors are produced when trying to compare these models to models with
+    #' a different number of variables.
+    
+    #' If there are any isolated variables, they need to be redefined as a circular formula.
+    #' This is how they need to be formatted for the phylopath::define_model_set function
+    if(any(x == names(x))){
       
-      for(j in 1:length(missing_variables)){
-        all_model_matricies[i][[1]] <- rbind(all_model_matricies[i][[1]], 0)
-        row.names(all_model_matricies[i][[1]])[nrow(all_model_matricies[i][[1]])] <- missing_variables[j]
+      isolated_variables <- x[x == names(x)]
+      
+      for(i in 1: length(isolated_variables)){
         
-        all_model_matricies[i][[1]] <- cbind(all_model_matricies[i][[1]], 0)
-        colnames(all_model_matricies[i][[1]])[ncol(all_model_matricies[i][[1]])] <- missing_variables[j]      
+        x[,isolated_variables[i]] <- paste(isolated_variables[i], "~", isolated_variables[i])
         
       }
+      
     }
+    
+    # Format as a list
+    as.list(x) %>%
+      
+      # Convert to formula
+      lapply(as.formula)
+    
   }
   
-  names(all_model_matricies) <- paste0("m", 1:length(all_model_matricies))
+  #' ------------
+  #' Defining variables
+  #' 
+  #' Taking the variable names from the data frame 
+  variables <- colnames(model_strings)
   
-  all_model_matricies
+  #' ------------
+  #' Converting strings to formulae
+  #' NOTE: This step could be made more efficient. The for loop is slow.
+  #list_model_formulae <- apply(model_strings, MARGIN = 1, string2formula)
+  list_model_formulae <- list()
+  
+  for(z in 1:nrow(model_strings)){
+    list_model_formulae[[z]] <- string2formula(model_strings[z,])
+  }
+  
+  # List to become the list of model matrices
+  all_model_matrices  <- list()
+  
+  #' For loop to convert each string to a DAG matrix
+  #' This part is also inefficient and could be improved. 
+  for(i in 1:length(list_model_formulae)){
+    
+    #' Defining a DAG matrix from the list of formulae in list_model_formulae
+    all_model_matrices [i] <- define_model_set(list_model_formulae[[i]])
+    
+  }
+  
+  names(all_model_matrices ) <- row.names(model_strings)
+  
+  all_model_matrices 
   
 }
-

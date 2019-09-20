@@ -1,5 +1,6 @@
-#' This script is set up to test the BEPA package with Cara's warfare project
-
+#' This script is set up to run the BEPA package with Cara's warfare project
+#' 
+#' This code and the functions in BEPA definitely need checking over!
 
 require(phylopath)
 require(dplyr)
@@ -28,7 +29,7 @@ variable_list <- colnames(data)[-which(colnames(data) == taxa_names)]
 # Check this looks ok  
 variable_list
 
-# This is uncessary when all columns are included in eiher variable_list, but tidies things up when more columns are included
+# This is unncessary when all columns are included in eiher variable_list, but tidies things up when more columns are included
 data_use <- data[,c(taxa_names, variable_list)]
 data_use <- na.omit(data_use)
 
@@ -71,7 +72,7 @@ all_models_raw <- get_all_models(variable_list = variable_list)
 
 #' ----------------------------------------------
 #' Converting all model from all_models_raw to matricies
-all_models <- strings_to_model_sets(list_model_strings = all_models_raw)
+all_models <- strings_to_model_sets(model_strings = all_models_raw)
 
 #' ----------------------------------------------
 #' Comparing all models
@@ -88,30 +89,29 @@ result_summary <- summary(result)
 # Plotting the results summary
 plot(result_summary[1:10,])
 
-plot(all_models$m13869)
-plot(all_models$m18465)
 
-#' OK, up to here. Am having issues. I think the issue is with the strings_to_model_sets function.
-#' Not all models are properly being converted into DAG matricies? 
-result_average <- average(result, avg_method = "full")
-
-
-
-#-----------------------------------
-# The best fitting model
+#' -----------------------------------
+#' Plotting models
+#' 
+#' Plotting best model
 best_model <- best(result)
 
-pdf(file = "2019.09.09_Best Model.pdf", width = 10, height = 6, compress = F, useDingbats = F)
+pdf(file = "Best Model.pdf", width = 10, height = 6, compress = F, useDingbats = F)
 
-  plot(best_model, curvature = 0.1)
+  plot(best_model)
   
 dev.off()
 
 # Average across best models
 average_model_full <- average(result, avg_method = "full")
 
-pdf(file = "2019.09.09_Average Models.pdf", width = 10, height = 6, compress = F, useDingbats = F)
+pdf(file = "Average of Models.pdf", width = 10, height = 6, compress = F, useDingbats = F)
 
-  plot(average_model_full, curvature = 0.1)
+  plot(average_model_full)
   
 dev.off()
+
+#' More stuff here:
+#' https://cran.r-project.org/web/packages/phylopath/vignettes/intro_to_phylopath.html
+
+
