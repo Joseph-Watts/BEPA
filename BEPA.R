@@ -34,6 +34,11 @@
 #' cases as predicted by themselves (e.g. "a ~ a") as this is how they are represented
 #' when converting to DAGs. Not sure.
 #' 
+#' 5. Might be worth putting warning messages in when too many variables are specified.
+#' Also, when there are too many cores specified. As core count increases so does total
+#' memory allocation required. Memory seems to be the bottle neck on my system on my
+#' 8 core, 64GB machine at the moment.
+#'
 #' ------------------------------------------
 require(phylopath)
 require(tidyverse)
@@ -61,10 +66,10 @@ get_all_models <- function(variable_list,
     require(parallel)
     
     #' If the number of cores to use are not defined,
-    #' use 2 less than the system has
+    #' use 4 less than the system has
     if(is.null(n_cores)){
       
-      n_cores <- detectCores(all.tests = FALSE, logical = TRUE) - 2
+      n_cores <- detectCores(all.tests = FALSE, logical = TRUE) - 4
       
     }
     
