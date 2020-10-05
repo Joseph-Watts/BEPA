@@ -18,26 +18,17 @@
 #' 
 #' ------------------------------------------
 #' Working notes:
-#' 1. This code is generally ugly and inefficient. Still needs checking and tidying.
+#' 1. This code still needs tidying.
 #' 
 #' 2. The exclusion function could be made more general
 #' Would probably be good to be able to exclude a wider range of models in the future.
 #' For example, might want to exclude multiple predictors of a single variable, or 
 #' require a variable to be predicted by others.
-#' 
-#' 3. Need to look into parallel processing
-#' Currently there is a commented out piece of code that would parallelise the most 
-#' time consuming part of the script, but it won’t work on Windows (mclapply doesnt run 
-#' in parallel on Windows.)
-#' 
-#' 4. Need to look into how the run this with multiple trees.
+#'  
+#' 3. Need to look into how the run this with multiple trees.
 #' Maybe worth looking into creating a function to run multiple trees.
 #' 
-#' 5. The outputs of these function still need careful checking.
-#' Need to make sure that the get_all_models function is not missing any models that 
-#' should be included.
-#' 
-#' 6. When a variable is not predicted by any other variables the get_all_models just 
+#' 4. When a variable is not predicted by any other variables the get_all_models just 
 #' puts the variable name in the variable column. This makes it easier to identify,
 #' but cannot be directly converted into a formula. It might be worth representing such
 #' cases as predicted by themselves (e.g. "a ~ a") as this is how they are represented
@@ -45,14 +36,7 @@
 #' 
 #' ------------------------------------------
 require(phylopath)
-require(dplyr)
-require(plyr)
-#require(foreach)
-#require(doParallel)
-#require(parallel)
-
-#n_cores <- detectCores(all.tests = FALSE, logical = TRUE)
-#registerDoParallel(cores = (n_cores-2))
+require(tidyverse)
 
 #' ------------------------------------------
 #' get_all_models function
@@ -64,7 +48,35 @@ require(plyr)
 #' Using the "exclusions" argument it is possible to exclude all models in which 
 #' one variable is predicted by another.
 
-get_all_models <- function(variable_list, exclusions){
+get_all_models <- function(variable_list, 
+                           exclusions, 
+                           parrallel = T,
+                           n_cores = NULL){
+  
+  #' If the parrallel arguemnt is true, set up a cluster
+  if(parrallel){
+    
+    #' load parallelisation packages
+    require(doParallel)
+    require(parallel)
+    
+    #' If the number of cores to use are not defined,
+    #' use 2 less than the system has
+    if(is.null(n_cores)){
+      
+      n_cores <- detectCores(all.tests = FALSE, logical = TRUE) - 2
+      
+    }
+    
+    #' Make clusters
+    cl <- makeCluster(n_cores)
+    registerDoParallel(cl)  
+    
+    #' Load the tidyverse within the clusters
+    clusterEvalQ(cl, library("tidyverse"))
+    
+  }
+  
   
   #' ----------------
   #' Some basic checks of the variables supplied
@@ -80,11 +92,28 @@ get_all_models <- function(variable_list, exclusions){
     
   }
   
+  #' Converting variable names into single letters
+  #' This saves systems memory and speeds things up a little
+  variables <- letters[1:length(variable_list)]
+  
+  #' Loop to replace variable names in exclusions
+  for(i in 1:length(variables)){
+    
+    if(length(grep(variable_list[i], variable_list)) > 1){
+      stop("Variable names embeded within other names not allowed") 
+      #' this is required for the variable character length reductions
+    }
+    
+    exclusions <- gsub(variable_list[i], variables[i], exclusions)
+    
+  }
+
+  
   #' ----------------
   #' Defining sub-functions
   
   #' ----
-  #' Function to reformat and tidy formulea text strings
+  #' Function to reformat and tidy formulae text strings
   tidy_strings <- function(x){
     x_items <- strsplit(x, " ") %>% unlist()
     x_items[!x_items %in% c("~", "+")]
@@ -104,8 +133,8 @@ get_all_models <- function(variable_list, exclusions){
     
     var_matrix <- data.frame(matrix(nrow = n_vars,
                                     ncol = n_vars))
-    colnames(var_matrix) <- variable_list
-    row.names(var_matrix) <- variable_list
+    colnames(var_matrix) <- variables
+    row.names(var_matrix) <- variables
     
     var_matrix[,] <- 0
     
@@ -149,25 +178,25 @@ get_all_models <- function(variable_list, exclusions){
   
   #' ----------------
   #' Number of variables
-  n_vars = length(variable_list)
+  n_vars = length(variables)
   
   #' ----------------
   #' Defining all possible components of a path model
   combos <- vector()
   
   for(i in 1:(n_vars - 1)){
-    i_combos <- combn(variable_list, m = i, simplify = F)
+    i_combos <- combn(variables, m = i, simplify = F)
     combos <- c(combos, i_combos)
   }
   
   every_formulae <- list()
   
-  #' This loop goes through each variable in the variable_list and defines every 
+  #' This loop goes through each variable in variables and defines every 
   #' possible combination of predictor variables
   for(i in 1:n_vars){
     
     #' Defining the response variable
-    i_var <- variable_list[i]
+    i_var <- variables[i]
     
     #' Creating a blank list, to contain every possible combination of predictor 
     #' variables for the response variable
@@ -240,7 +269,7 @@ get_all_models <- function(variable_list, exclusions){
   #' ------------
   #' Setting up the first variable combos
   
-  first_var_formulae <- every_formulae[grepl(paste0("^", variable_list[1]), every_formulae)] %>% 
+  first_var_formulae <- every_formulae[grepl(paste0("^", variables[1]), every_formulae)] %>% 
     unlist()
   
   all_formulae_combos <- data.frame(matrix(nrow = length(first_var_formulae), 
@@ -248,13 +277,14 @@ get_all_models <- function(variable_list, exclusions){
   
   all_formulae_combos[,1] <- first_var_formulae
   
-  colnames(all_formulae_combos) <- variable_list
+  colnames(all_formulae_combos) <- variables
   
-  # Using a loop to identify all other usable path model structures
+  #' Using a loop to identify all other usable path model structures
+  #' This is where most of the time is used 
   for(i in 2:n_vars){
     
     # Defining the response variable for this iteration
-    i_var <- variable_list[i]
+    i_var <- variables[i]
     
     # Select all formulae that predict i_var
     i_formulae <- every_formulae[grepl(paste0("^", i_var), every_formulae)] %>% unlist()
@@ -268,12 +298,27 @@ get_all_models <- function(variable_list, exclusions){
     all_formulae_combos[,i_var] <- rep(i_formulae, times = n_rows_start)
     
     #' This is the part of this loop that takes a while. 
-    #' Probably need to work out an efficient way to make this parallel.
-    combos_to_include <- apply(all_formulae_combos, 1, model_filter)
     
-    # This line below should parallelise the function, but won't work on Windows machines
-    #combos_to_include <- mclapply(alply(all_formulae_combos, .margins = 1), model_filter, mc.cores = n_cores - 2)
-    
+    if(parrallel){
+      
+      clusterExport(cl= cl, 
+                    varlist = ls(), 
+                    envir = environment())
+      
+      combos_to_include <- parApply(cl = cl,
+                                    X = all_formulae_combos, 
+                                    MARGIN = 1, 
+                                    FUN = model_filter)
+      
+      # This line below won't work on Windows machines
+      #combos_to_include <- mclapply(alply(all_formulae_combos, .margins = 1), model_filter, mc.cores = n_cores - 2)
+      
+    }else{
+      
+      combos_to_include <- apply(all_formulae_combos, 1, model_filter)
+      
+    }
+
     all_formulae_combos <- all_formulae_combos[combos_to_include, ]
     
   }
@@ -290,7 +335,26 @@ get_all_models <- function(variable_list, exclusions){
   
   row.names(all_formulae_combos) <- paste0("m", 1:nrow(all_formulae_combos))
   
-  all_formulae_combos
+  if(parrallel){
+    
+    stopCluster(cl)
+    
+  }
+  
+  
+  #' Loop to replace variable names
+  for(i in 1:length(variables)){
+    
+    all_formulae_combos[,] <- apply(all_formulae_combos[,],
+          MARGIN = 1,
+          FUN = stringr::str_replace_all,
+          variables[i], 
+          variable_list[i]) %>% 
+      t()
+    
+  }
+  
+  return(all_formulae_combos)
   
 }
 
@@ -312,7 +376,7 @@ strings_to_model_sets <- function(model_strings){
   #' ----
   #' Function to covert strings to fomula
   string2formula <- function(x){
-       
+    
     #' If there are any isolated variables, they need to be redefined as a circular formula.
     #' This is how they need to be formatted for the phylopath::define_model_set function
     if(any(x == names(x))){
@@ -365,6 +429,6 @@ strings_to_model_sets <- function(model_strings){
   
   names(all_model_matrices ) <- row.names(model_strings)
   
-  all_model_matrices 
+  return(all_model_matrices)
   
 }
