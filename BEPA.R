@@ -36,12 +36,13 @@
 #' 
 #' 5. Might be worth putting warning messages in when too many variables are specified.
 #' Also, when there are too many cores specified. As core count increases so does total
-#' memory allocation required. Memory seems to be the bottle neck on my system on my
-#' 8 core, 64GB machine at the moment.
+#' memory allocation required. Memory can be a bottle neck when a large (>5) number 
+#' of variables are included.
 #'
 #' ------------------------------------------
 require(phylopath)
 require(tidyverse)
+require(gsubfn)
 
 #' ------------------------------------------
 #' get_all_models function
@@ -73,13 +74,13 @@ get_all_models <- function(variable_list,
       
     }
     
-    #' Make clusters
+    #' Make cluster
     cl <- makeCluster(n_cores)
     registerDoParallel(cl)  
     
-    #' Load the tidyverse within the clusters
+    #' Load the packages within the cluster
     clusterEvalQ(cl, library("tidyverse"))
-    
+    clusterEvalQ(cl, library("gsubfn"))
   }
   
   
@@ -116,6 +117,18 @@ get_all_models <- function(variable_list,
   
   #' ----------------
   #' Defining sub-functions
+  
+  #' ----
+  #' Alternative to gsubfn with arguments ordered for ease of use with apply
+  alt_gsubfn <- function(x, 
+                         pattern,
+                         replacement){
+    
+    gsubfn(pattern = pattern,
+           replacement = replacement,
+           x = x)
+    
+  }
   
   #' ----
   #' Function to reformat and tidy formulae text strings
@@ -339,29 +352,31 @@ get_all_models <- function(variable_list,
   all_formulae_combos <- all_formulae_combos[r_index,]
   
   row.names(all_formulae_combos) <- paste0("m", 1:nrow(all_formulae_combos))
+
+  #' Replacing the single letter variable names with the full variable names again
+  all_formulae_combos <- parApply(cl = cl,
+                   X = all_formulae_combos,
+                   MARGIN = 2,
+                   FUN = alt_gsubfn,
+                   "\\S+",
+                   setNames(as.list(variable_list), variables)) %>%
+    as.data.frame(stringsAsFactors = F)
   
+  colnames(all_formulae_combos) <- variable_list
+  
+  #' Stopping cluster
   if(parrallel){
     
     stopCluster(cl)
     
   }
   
-  
-  #' Loop to replace variable names
-  for(i in 1:length(variables)){
-    
-    all_formulae_combos[,] <- apply(all_formulae_combos[,],
-          MARGIN = 1,
-          FUN = stringr::str_replace_all,
-          variables[i], 
-          variable_list[i]) %>% 
-      t()
-    
-  }
-  
+  #' Doneskies
   return(all_formulae_combos)
   
 }
+
+
 
 #' ------------------------------------------
 #' strings_to_model_sets function
@@ -373,7 +388,9 @@ get_all_models <- function(variable_list,
 #' Requires the columns to be named after each variable, which should 
 #' be the case if the get_all_models function is used
 
-strings_to_model_sets <- function(model_strings){
+strings_to_model_sets <- function(model_strings,
+                                  parrallel = T,
+                                  n_cores = NULL){
   
   #' ----------------
   #' Defining sub-functions
@@ -381,6 +398,8 @@ strings_to_model_sets <- function(model_strings){
   #' ----
   #' Function to covert strings to fomula
   string2formula <- function(x){
+    
+    x <- as.list(x) %>% unlist()
     
     #' If there are any isolated variables, they need to be redefined as a circular formula.
     #' This is how they need to be formatted for the phylopath::define_model_set function
@@ -390,7 +409,7 @@ strings_to_model_sets <- function(model_strings){
       
       for(i in 1: length(isolated_variables)){
         
-        x[,isolated_variables[i]] <- paste(isolated_variables[i], "~", isolated_variables[i])
+        x[isolated_variables[i]] <- paste(isolated_variables[i], "~", isolated_variables[i])
         
       }
       
@@ -416,19 +435,62 @@ strings_to_model_sets <- function(model_strings){
   #list_model_formulae <- apply(model_strings, MARGIN = 1, string2formula)
   list_model_formulae <- list()
   
-  for(m in 1:nrow(model_strings)){
-    list_model_formulae[[m]] <- string2formula(model_strings[m,])
+  
+  #' If the parrallel argument is true, set up a cluster
+  if(parrallel){
+    
+    #' load parallelisation packages
+    require(doParallel)
+    require(parallel)
+    
+    #' If the number of cores to use are not defined,
+    #' use 4 less than the system has
+    if(is.null(n_cores)){
+      
+      n_cores <- detectCores(all.tests = FALSE, logical = TRUE) - 4
+      
+    }
+    
+    #' Make cluster
+    cl <- makeCluster(n_cores)
+    registerDoParallel(cl)  
+    
+    #' Load the packages within the cluster
+    clusterEvalQ(cl, library("tidyverse"))
   }
+  
   
   # List to become the list of model matrices
   all_model_matrices  <- list()
   
-  #' For loop to convert each string to a DAG matrix
-  #' This part is also inefficient and could be improved. 
-  for(i in 1:length(list_model_formulae)){
+  if(parrallel){
     
-    #' Defining a DAG matrix from the list of formulae in list_model_formulae
-    all_model_matrices [i] <- define_model_set(list_model_formulae[[i]])
+    list_model_formulae <- parApply(cl = cl,
+                                    X = model_strings,
+                                    MARGIN = 1,
+                                    FUN = string2formula)
+    
+    
+    all_model_matrices <- parSapply(cl = cl,
+                                    X = list_model_formulae,
+                                    FUN = define_model_set)
+    #' stopping cluster
+    stopCluster(cl)
+    
+  }else{
+    
+    for(m in 1:nrow(model_strings)){
+      list_model_formulae[[m]] <- string2formula(model_strings[m,])
+    }
+    
+    #' For loop to convert each string to a DAG matrix
+    #' This part is also inefficient and could be improved. 
+    for(i in 1:length(list_model_formulae)){
+      
+      #' Defining a DAG matrix from the list of formulae in list_model_formulae
+      all_model_matrices[i] <- define_model_set(list_model_formulae[[i]])
+      
+    }
     
   }
   
