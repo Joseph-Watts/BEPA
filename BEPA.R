@@ -38,6 +38,20 @@
 #' Also, when there are too many cores specified. As core count increases so does total
 #' memory allocation required. Memory can be a bottle neck when a large (>5) number 
 #' of variables are included.
+#' 
+#' 6. Add a summary printout at the end of the function? Indicating how long each function
+#' took to run?
+#' 
+#' 7. Add ardugments to function to specify whether to simplify variable names, and whether
+#' to back translate them?
+#' 
+#' 8. To get around memory issues, it might be possible to run the function in sections,
+#' save the outputs to a drive, then at the end combine them together? 
+#' 
+#' Future directions:
+#' 1. Rather than having to the function anew every time, maybe it is worth saving an index
+#' and then just reading it back in and then filtering it? 
+#' 
 #'
 #' ------------------------------------------
 require(phylopath)
