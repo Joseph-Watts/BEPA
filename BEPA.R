@@ -69,7 +69,7 @@ require(gsubfn)
 #' one variable is predicted by another.
 
 get_all_models <- function(variable_list, 
-                           exclusions, 
+                           exclusions = NA, 
                            parrallel = T,
                            n_cores = NULL){
   
