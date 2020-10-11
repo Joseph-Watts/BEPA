@@ -71,6 +71,7 @@ require(gsubfn)
 get_all_models <- function(variable_list, 
                            exclusions = NA, 
                            parrallel = T,
+                           max_variables_in_models = NULL,
                            n_cores = NULL){
   
   #' If the parrallel arguemnt is true, set up a cluster
@@ -116,18 +117,21 @@ get_all_models <- function(variable_list,
   #' This saves systems memory and speeds things up a little
   variables <- letters[1:length(variable_list)]
   
-  #' Loop to replace variable names in exclusions
-  for(i in 1:length(variables)){
-    
-    if(length(grep(variable_list[i], variable_list)) > 1){
-      stop("Variable names embeded within other names not allowed") 
-      #' this is required for the variable character length reductions
+  if(!is.na(exclusions)){
+  
+    #' Loop to replace variable names in exclusions
+    for(i in 1:length(variables)){
+      
+      if(length(grep(variable_list[i], variable_list)) > 1){
+        stop("Variable names embeded within other names not allowed") 
+        #' this is required for the variable character length reductions
+      }
+      
+      exclusions <- gsub(variable_list[i], variables[i], exclusions)
+      
     }
     
-    exclusions <- gsub(variable_list[i], variables[i], exclusions)
-    
   }
-
   
   #' ----------------
   #' Defining sub-functions
@@ -216,9 +220,23 @@ get_all_models <- function(variable_list,
   #' Defining all possible components of a path model
   combos <- vector()
   
-  for(i in 1:(n_vars - 1)){
+  if(is.null(max_variables_in_models)){
+    
+    max_predictors <- n_vars - 1
+    
+  } else {
+    
+    max_predictors <- max_variables_in_models - 1
+    
+  }
+
+  
+  for(i in 1:max_predictors){
+    
     i_combos <- combn(variables, m = i, simplify = F)
+    
     combos <- c(combos, i_combos)
+    
   }
   
   every_formulae <- list()
