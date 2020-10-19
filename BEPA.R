@@ -69,7 +69,7 @@ require(gsubfn)
 #' one variable is predicted by another.
 
 get_all_models <- function(variable_list, 
-                           exclusions = NA, 
+                           exclusions = NULL, 
                            parrallel = T,
                            max_variables_in_models = NULL,
                            n_cores = NULL){
@@ -117,7 +117,7 @@ get_all_models <- function(variable_list,
   #' This saves systems memory and speeds things up a little
   variables <- letters[1:length(variable_list)]
   
-  if(!is.na(exclusions)){
+  if(!is.null(exclusions)){
   
     #' Loop to replace variable names in exclusions
     for(i in 1:length(variables)){
@@ -279,7 +279,7 @@ get_all_models <- function(variable_list,
   #' Dropping any excluded components of the path model
   
   # If exclusions have been specified, then drop them from the every_formulae list
-  if(!missing(exclusions)){
+  if(!is.null(exclusions)){
     
     every_formulae_characters <- lapply(every_formulae, tidy_strings)
     
