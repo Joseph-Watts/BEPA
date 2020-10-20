@@ -58,6 +58,102 @@ require(phylopath)
 require(tidyverse)
 require(gsubfn)
 
+
+
+#' ----------------
+#' Defining sub-functions
+
+#' ----
+#' Alternative to gsubfn with arguments ordered for ease of use with apply
+alt_gsubfn <- function(x, 
+                       pattern,
+                       replacement){
+  
+  gsubfn(pattern = pattern,
+         replacement = replacement,
+         x = x) %>%
+    return()
+  
+}
+
+#' ----
+#' Function to reformat and tidy formulae text strings
+tidy_strings <- function(x){
+  x_items <- strsplit(x, " ") %>% unlist()
+  x_items[!x_items %in% c("~", "+")] %>%
+    return()
+}
+
+#' ----
+#' Function to test whether formulae contain circularity
+model_filter <- function(formulae_list){
+  f <- formulae_list[ ! is.na(formulae_list)]
+  
+  tidy_strings <- function(x){
+    x_items <- strsplit(x, " ") %>% unlist()
+    x_items[!x_items %in% c("~", "+")]
+  }
+  
+  f_tidy <- lapply(f, tidy_strings)
+  
+  var_matrix <- data.frame(matrix(nrow = n_vars,
+                                  ncol = n_vars))
+  colnames(var_matrix) <- variables
+  row.names(var_matrix) <- variables
+  
+  var_matrix[,] <- 0
+  
+  for(f_i in 1:length(f_tidy)){
+    if(length(f_tidy[[f_i]]) > 1){
+      var_col <- f_tidy[[f_i]][1]
+      var_rows <- f_tidy[[f_i]][2:length(f_tidy[[f_i]])]
+      var_matrix[var_rows, var_col] <- 1 
+    }
+    
+  }
+  
+  # By default the function will output False
+  output <- F
+  
+  tryCatch({
+    
+    #' This is a bit of a hack, but uses the basiSet function in the ggm package 
+    #' to identify whether the var_matrix is acyclic (tests whether there is 
+    #' circularity in the predictor variable structure)
+    #' This function will fail when the matrix is not acyclic, and the tryCatch 
+    #' function is used to prevent this from stopping the function.
+    #' NOTE: If I wanted to develop this further, I could potentially find the 
+    #' source code the for basiSet function and adapt it for the current purposes. 
+    
+    f_test <- ggm::basiSet(as.matrix(var_matrix))
+    
+    if(length(f_test) > 1){
+      output <- T
+    }
+    
+  }, error=function(e){})
+  
+  #    }
+  
+  #' This outputs TRUE if the model is acyclic and FALSE if the model contains 
+  #' circularity.
+  return(output)
+  
+}
+
+
+x_not_in_y <- function(x, pattern){
+  
+  grepl(pattern = pattern,
+        x = x) %>%
+    sum() == 0 %>%
+    return()
+  
+}
+
+
+
+
 #' ------------------------------------------
 #' get_all_models function
 #' 
@@ -68,12 +164,28 @@ require(gsubfn)
 #' Using the "exclusions" argument it is possible to exclude all models in which 
 #' one variable is predicted by another.
 
+
 get_all_models <- function(variable_list, 
                            exclusions = NULL, 
                            parrallel = T,
                            max_variables_in_models = NULL,
+                           required_variables = NULL,
                            n_cores = NULL){
   
+  testing = F
+  
+  if(testing){
+    
+    variable_list = c("Aa11", "Bb22", "Cc33", "Dd44", "Ee55")
+    exclusions = c("Aa11 ~ Bb22", 
+                   "Dd44 ~ Bb22") 
+    parrallel = T
+    max_variables_in_models = 4
+    required_variables = "Ee55"
+    n_cores = 4
+    
+  }
+    
   #' If the parrallel arguemnt is true, set up a cluster
   if(parrallel){
     
@@ -133,84 +245,23 @@ get_all_models <- function(variable_list,
     
   }
   
-  #' ----------------
-  #' Defining sub-functions
-  
-  #' ----
-  #' Alternative to gsubfn with arguments ordered for ease of use with apply
-  alt_gsubfn <- function(x, 
-                         pattern,
-                         replacement){
+  if(!is.null(required_variables)){
     
-    gsubfn(pattern = pattern,
-           replacement = replacement,
-           x = x)
-    
-  }
-  
-  #' ----
-  #' Function to reformat and tidy formulae text strings
-  tidy_strings <- function(x){
-    x_items <- strsplit(x, " ") %>% unlist()
-    x_items[!x_items %in% c("~", "+")]
-  }
-  
-  #' ----
-  #' Function to test whether formulae contain circularity
-  model_filter <- function(formulae_list){
-    f <- formulae_list[ ! is.na(formulae_list)]
-    
-    tidy_strings <- function(x){
-      x_items <- strsplit(x, " ") %>% unlist()
-      x_items[!x_items %in% c("~", "+")]
-    }
-    
-    f_tidy <- lapply(f, tidy_strings)
-    
-    var_matrix <- data.frame(matrix(nrow = n_vars,
-                                    ncol = n_vars))
-    colnames(var_matrix) <- variables
-    row.names(var_matrix) <- variables
-    
-    var_matrix[,] <- 0
-    
-    for(f_i in 1:length(f_tidy)){
-      if(length(f_tidy[[f_i]]) > 1){
-        var_col <- f_tidy[[f_i]][1]
-        var_rows <- f_tidy[[f_i]][2:length(f_tidy[[f_i]])]
-        var_matrix[var_rows, var_col] <- 1 
+    #' Loop to replace variable names in exclusions
+    for(i in 1:length(variables)){
+      
+      if(length(grep(variable_list[i], variable_list)) > 1){
+        stop("Variable names embeded within other names not allowed") 
+        #' this is required for the variable character length reductions
       }
+      
+      required_variables <- gsub(variable_list[i], variables[i], required_variables)
       
     }
     
-    # By default the function will output False
-    output <- F
-    
-    tryCatch({
-      
-      #' This is a bit of a hack, but uses the basiSet function in the ggm package 
-      #' to identify whether the var_matrix is acyclic (tests whether there is 
-      #' circularity in the predictor variable structure)
-      #' This function will fail when the matrix is not acyclic, and the tryCatch 
-      #' function is used to prevent this from stopping the function.
-      #' NOTE: If I wanted to develop this further, I could potentially find the 
-      #' source code the for basiSet function and adapt it for the current purposes. 
-      
-      f_test <- ggm::basiSet(as.matrix(var_matrix))
-      
-      if(length(f_test) > 1){
-        output <- T
-      }
-      
-    }, error=function(e){})
-    
-    #    }
-    
-    #' This outputs TRUE if the model is acyclic and FALSE if the model contains 
-    #' circularity.
-    output
-    
   }
+  
+  
   
   #' ----------------
   #' Number of variables
@@ -239,6 +290,7 @@ get_all_models <- function(variable_list,
     
   }
   
+
   every_formulae <- list()
   
   #' This loop goes through each variable in variables and defines every 
@@ -383,6 +435,40 @@ get_all_models <- function(variable_list,
   
   all_formulae_combos <- all_formulae_combos[r_index,]
   
+  #' Quick tidy, these names will be replaced later
+  rownames(all_formulae_combos) <- c()
+  
+  #' Dropping combos that do not include required variables
+  if(!is.null(required_variables)){
+    
+    for(i in 1:length(required_variables)){
+      
+      i_col_index <- which(colnames(all_formulae_combos) == required_variables[i])
+      
+      #' Index of all rows in which the required variable is not predicted by any other variables
+      i_not_response <- which(all_formulae_combos[, i_col_index] == required_variables[i])
+      
+      #' Index of all rows in which i is not a predictor variable
+      i_not_predictor <- apply(X = all_formulae_combos[ , -i_col_index], 
+                                       MARGIN = 1,
+                                       FUN = x_not_in_y,
+                                       required_variables[i]) %>% 
+        which()
+      
+      test <- all_formulae_combos[- i_not_response, ]
+      test <- test[- i_not_predictor, ]
+      
+      #' Drop rows if the required variable is neither a response variable or a predictor variable
+      
+      i_drop <- intersect(i_not_response, i_not_predictor)
+      
+      all_formulae_combos <- all_formulae_combos[- i_drop, ]
+       
+    }
+    
+  }
+  
+  #' Renaming the model columns
   row.names(all_formulae_combos) <- paste0("m", 1:nrow(all_formulae_combos))
 
   #' Replacing the single letter variable names with the full variable names again
