@@ -53,12 +53,16 @@
 #' and then just reading it back in and then filtering it? 
 #' 
 #'
+#' Notes:
+#' 1. Need to put the parallel argument back in. 
+#' Currently the F option doesnt work properly (appears it does, but doesnt generate enough models to be correct)
+#'
 #' ------------------------------------------
 require(phylopath)
 require(tidyverse)
 require(gsubfn)
-
-
+require(doParallel)
+require(parallel)
 
 #' ----------------
 #' Defining sub-functions
@@ -167,31 +171,39 @@ x_not_in_y <- function(x, pattern){
 
 get_all_models <- function(variable_list, 
                            exclusions = NULL, 
-                           parrallel = T,
+                           #parallel = T,
                            max_variables_in_models = NULL,
                            required_variables = NULL,
                            n_cores = NULL){
+  
+  # Need to update this later, argument currently not working
+  parallel = T
   
   testing = F
   
   if(testing){
     
-    variable_list = c("Aa11", "Bb22", "Cc33", "Dd44", "Ee55")
-    exclusions = c("Aa11 ~ Bb22", 
-                   "Dd44 ~ Bb22") 
-    parrallel = T
+    variable_list = c("Aa11", 
+                      "Bb22", 
+                      #"Cc33", 
+                      "Dd44", 
+                      "Ee55")
+    
+    #exclusions = c("Aa11 ~ Bb22", 
+    #               "Dd44 ~ Bb22") 
+    parallel = F
     max_variables_in_models = 4
-    required_variables = "Ee55"
+    #required_variables = "Ee55"
     n_cores = 4
     
   }
     
-  #' If the parrallel arguemnt is true, set up a cluster
-  if(parrallel){
+  #' If the parallel arguemnt is true, set up a cluster
+  if(parallel){
     
     #' load parallelisation packages
-    require(doParallel)
-    require(parallel)
+    #require(doParallel)
+    #require(parallel)
     
     #' If the number of cores to use are not defined,
     #' use 4 less than the system has
@@ -401,7 +413,7 @@ get_all_models <- function(variable_list,
     
     #' This is the part of this loop that takes a while. 
     
-    if(parrallel){
+    if(parallel){
       
       clusterExport(cl= cl, 
                     varlist = ls(), 
@@ -472,22 +484,31 @@ get_all_models <- function(variable_list,
   row.names(all_formulae_combos) <- paste0("m", 1:nrow(all_formulae_combos))
 
   #' Replacing the single letter variable names with the full variable names again
-  all_formulae_combos <- parApply(cl = cl,
-                   X = all_formulae_combos,
-                   MARGIN = 2,
-                   FUN = alt_gsubfn,
-                   "\\S+",
-                   setNames(as.list(variable_list), variables)) %>%
-    as.data.frame(stringsAsFactors = F)
-  
-  colnames(all_formulae_combos) <- variable_list
-  
-  #' Stopping cluster
-  if(parrallel){
+  if(parallel){
     
+    all_formulae_combos <- parApply(cl = cl,
+                                    X = all_formulae_combos,
+                                    MARGIN = 2,
+                                    FUN = alt_gsubfn,
+                                    "\\S+",
+                                    setNames(as.list(variable_list), variables)) %>%
+      as.data.frame(stringsAsFactors = F)
+    
+    #' Stopping cluster
     stopCluster(cl)
     
+  } else {
+    
+    all_formulae_combos <- apply(X = all_formulae_combos,
+                                    MARGIN = 2,
+                                    FUN = alt_gsubfn,
+                                    "\\S+",
+                                    setNames(as.list(variable_list), variables)) %>%
+      as.data.frame(stringsAsFactors = F)
+    
   }
+  
+  colnames(all_formulae_combos) <- variable_list
   
   #' Doneskies
   return(all_formulae_combos)
@@ -507,7 +528,7 @@ get_all_models <- function(variable_list,
 #' be the case if the get_all_models function is used
 
 strings_to_model_sets <- function(model_strings,
-                                  parrallel = T,
+                                  parallel = T,
                                   n_cores = NULL){
   
   #' ----------------
@@ -554,12 +575,12 @@ strings_to_model_sets <- function(model_strings,
   list_model_formulae <- list()
   
   
-  #' If the parrallel argument is true, set up a cluster
-  if(parrallel){
+  #' If the parallel argument is true, set up a cluster
+  if(parallel){
     
     #' load parallelisation packages
-    require(doParallel)
-    require(parallel)
+    #require(doParallel)
+    #require(parallel)
     
     #' If the number of cores to use are not defined,
     #' use 4 less than the system has
@@ -581,7 +602,7 @@ strings_to_model_sets <- function(model_strings,
   # List to become the list of model matrices
   all_model_matrices  <- list()
   
-  if(parrallel){
+  if(parallel){
     
     list_model_formulae <- parApply(cl = cl,
                                     X = model_strings,
