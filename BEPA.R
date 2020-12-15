@@ -1,11 +1,8 @@
 #' Brute-force Exploratory Path Analysis (BEPA)
 #' 
-#' Package still in development, please do not circulate.
-#' 
-#' Joseph Watts - me@josephwatts.org
+#' Joseph Watts - https://github.com/Joseph-Watts
 #' 
 #' The BEPA package contains functions to help perform exploratory path analysis in R.
-#' As the name suggests, this is not done efficiently or elegantly.
 #' 
 #' The package can be used to identify all possible path model structures, given a set of 
 #' variables. All of these models can then be compared. Time taken increases exponentially 
@@ -16,47 +13,33 @@
 #' The functions should also be useable for exploratory path analyses more generally, but 
 #' this has not been tested.
 #' 
+#' Currently this has only been tested on Windows 10. 
+#' 
 #' ------------------------------------------
 #' Working notes:
-#' 1. This code still needs tidying.
-#' 
-#' 2. The exclusion function could be made more general
+#' 1. The exclusion function could be made more general
 #' Would probably be good to be able to exclude a wider range of models in the future.
 #' For example, might want to exclude multiple predictors of a single variable, or 
 #' require a variable to be predicted by others.
 #'  
-#' 3. Need to look into how the run this with multiple trees.
-#' Maybe worth looking into creating a function to run multiple trees.
-#' 
-#' 4. When a variable is not predicted by any other variables the get_all_models just 
+#' 2. When a variable is not predicted by any other variables the get_all_models just 
 #' puts the variable name in the variable column. This makes it easier to identify,
 #' but cannot be directly converted into a formula. It might be worth representing such
 #' cases as predicted by themselves (e.g. "a ~ a") as this is how they are represented
 #' when converting to DAGs. Not sure.
 #' 
-#' 5. Might be worth putting warning messages in when too many variables are specified.
+#' 3. Might be worth putting warning messages in when too many variables are specified.
 #' Also, when there are too many cores specified. As core count increases so does total
 #' memory allocation required. Memory can be a bottle neck when a large (>5) number 
 #' of variables are included.
 #' 
-#' 6. Add a summary printout at the end of the function? Indicating how long each function
-#' took to run?
-#' 
-#' 7. Add ardugments to function to specify whether to simplify variable names, and whether
-#' to back translate them?
-#' 
-#' 8. To get around memory issues, it might be possible to run the function in sections,
+#' 8. To get around RAM constraints, it might be possible to run the function in sections,
 #' save the outputs to a drive, then at the end combine them together? 
 #' 
-#' Future directions:
+#' Possible future directions:
 #' 1. Rather than having to the function anew every time, maybe it is worth saving an index
 #' and then just reading it back in and then filtering it? 
 #' 
-#'
-#' Notes:
-#' 1. Need to put the parallel argument back in. 
-#' Currently the F option doesnt work properly (appears it does, but doesnt generate enough models to be correct)
-#'
 #' ------------------------------------------
 require(phylopath)
 require(tidyverse)
@@ -202,9 +185,9 @@ get_all_models <- function(variable_list,
                            exclusions = NULL, 
                            parallel = F,
                            max_variables_in_models = NULL,
-                           required_variables = NULL, #' Note: this argument is functional when the max_variables_in_model 
-                                                      #' is less than length(variable_list). Might be worth having a check 
-                                                      #' or warning when this is not the case.
+                           required_variables = NULL, #' Note: this argument only functions when max_variables_in_model 
+                           #' is less than length(variable_list). Might be worth giving a warning when this arguments
+                           #' is specified but not actually doing anything.
                            n_cores = NULL){
   
   testing = F
@@ -238,9 +221,9 @@ get_all_models <- function(variable_list,
     if(n_cores > 1){
       
       warning("n_cores can only be greater than 1 when parallel is set to T: running on a single thread")
-    
-    }
       
+    }
+    
   }
   
   
@@ -266,7 +249,7 @@ get_all_models <- function(variable_list,
         print(paste0("parallel set to TRUE, n_cores not defined: n_cores set to ", n_cores))
         
       }
-        
+      
     }else if(n_cores > total_system_threads){
       
       n_cores <- total_system_threads
@@ -284,13 +267,9 @@ get_all_models <- function(variable_list,
     }
     
   }
-    
+  
   #' If the parallel argument is true, set up a cluster
   if(parallel){
-    
-    #' load parallelisation packages
-    #require(doParallel)
-    #require(parallel)
 
     #' Make cluster
     cl <- makeCluster(n_cores)
@@ -325,7 +304,7 @@ get_all_models <- function(variable_list,
   variables <- letters[1:length(variable_list)]
   
   if(!is.null(exclusions)){
-  
+    
     #' Loop to replace variable names in exclusions
     for(i in 1:length(variables)){
       
@@ -375,7 +354,7 @@ get_all_models <- function(variable_list,
     max_predictors <- max_variables_in_models - 1
     
   }
-
+  
   
   for(i in 1:max_predictors){
     
@@ -385,7 +364,7 @@ get_all_models <- function(variable_list,
     
   }
   
-
+  
   every_formulae <- list()
   
   #' This loop goes through each variable in variables and defines every 
@@ -450,7 +429,7 @@ get_all_models <- function(variable_list,
             every_formulae_include[i] <- FALSE
             #' Note, this will continue running through the list of exclusions, 
             #' even if one has been met. 
-            #' Should probably jump to the end of the j and i iterations at this point.
+            #' It would be more efficient to jump to the end of the j and i loops at this point?
           }
           
         }
@@ -508,9 +487,6 @@ get_all_models <- function(variable_list,
                                     FUN = model_filter,
                                     m_variables = variables)
       
-      # This line below won't work on Windows machines
-      #combos_to_include <- mclapply(alply(all_formulae_combos, .margins = 1), model_filter, mc.cores = n_cores - 2)
-      
     }else{
       
       combos_to_include <- apply(X = all_formulae_combos, 
@@ -519,13 +495,13 @@ get_all_models <- function(variable_list,
                                  m_variables = variables)
       
     }
-
+    
     all_formulae_combos <- all_formulae_combos[combos_to_include, ]
     
   }
   
   #' There should be one row in which no variables are predicted by any other variables. 
-  #' This needs to be dropped. 
+  #' This is dropped here.
   r_index <- NULL
   
   for(r in 1:nrow(all_formulae_combos)){
@@ -549,27 +525,26 @@ get_all_models <- function(variable_list,
       
       #' Index of all rows in which i is not a predictor variable
       i_not_predictor <- apply(X = all_formulae_combos[ , -i_col_index], 
-                                       MARGIN = 1,
-                                       FUN = x_not_in_y,
-                                       required_variables[i]) %>% 
+                               MARGIN = 1,
+                               FUN = x_not_in_y,
+                               required_variables[i]) %>% 
         which()
       
       test <- all_formulae_combos[- i_not_response, ]
       test <- test[- i_not_predictor, ]
       
       #' Drop rows if the required variable is neither a response variable or a predictor variable
-      
       i_drop <- intersect(i_not_response, i_not_predictor)
       
       all_formulae_combos <- all_formulae_combos[- i_drop, ]
-       
+      
     }
     
   }
   
   #' Renaming the model columns
   row.names(all_formulae_combos) <- paste0("m", 1:nrow(all_formulae_combos))
-
+  
   #' Replacing the single letter variable names with the full variable names again
   if(parallel){
     
@@ -587,10 +562,10 @@ get_all_models <- function(variable_list,
   } else {
     
     all_formulae_combos <- apply(X = all_formulae_combos,
-                                    MARGIN = 2,
-                                    FUN = alt_gsubfn,
-                                    "\\S+",
-                                    setNames(as.list(variable_list), variables)) %>%
+                                 MARGIN = 2,
+                                 FUN = alt_gsubfn,
+                                 "\\S+",
+                                 setNames(as.list(variable_list), variables)) %>%
       as.data.frame(stringsAsFactors = F)
     
   }
@@ -624,10 +599,10 @@ strings_to_model_sets <- function(model_strings,
   if(testing){
     
     model_strings <- get_all_models(variable_list = c("Aa11", 
-                                       "Bb22", 
-                                       #"Cc33", 
-                                       "Dd44", 
-                                       "Ee55"))
+                                                      "Bb22", 
+                                                      #"Cc33", 
+                                                      "Dd44", 
+                                                      "Ee55"))
     
     parallel = T
     n_cores = NULL
@@ -693,10 +668,6 @@ strings_to_model_sets <- function(model_strings,
   
   #' If the parallel argument is true, set up a cluster
   if(parallel){
-    
-    #' load parallelisation packages
-    #require(doParallel)
-    #require(parallel)
 
     #' Make cluster
     cl <- makeCluster(n_cores)
@@ -715,10 +686,7 @@ strings_to_model_sets <- function(model_strings,
   
   #' ------------
   #' Converting strings to formulae
-  #' NOTE: This step could be made more efficient. The for loop is slow.
-  #list_model_formulae <- apply(model_strings, MARGIN = 1, string2formula)
   list_model_formulae <- list()
-  
   
   # List to become the list of model matrices
   all_model_matrices  <- list()
@@ -741,25 +709,12 @@ strings_to_model_sets <- function(model_strings,
   }else{
     
     list_model_formulae <- apply(X = model_strings,
-                                  MARGIN = 1,
-                                  FUN = string2formula)
+                                 MARGIN = 1,
+                                 FUN = string2formula)
     
     all_model_matrices <- sapply(X = list_model_formulae,
                                  FUN = define_model_set)
-    
-    #for(m in 1:nrow(model_strings)){
-    #  list_model_formulae[[m]] <- string2formula(model_strings[m,])
-    #}
-    
-    #' For loop to convert each string to a DAG matrix
-    #' This part is also inefficient and could be improved. 
-    #for(i in 1:length(list_model_formulae)){
-    #  
-    #  #' Defining a DAG matrix from the list of formulae in list_model_formulae
-    #  all_model_matrices[i] <- define_model_set(list_model_formulae[[i]])
-    #  
-    #}
-    
+
   }
   
   names(all_model_matrices ) <- row.names(model_strings)
