@@ -90,7 +90,11 @@ tidy_strings <- function(x){
 
 #' ----
 #' Function to test whether formulae contain circularity
-model_filter <- function(formulae_list){
+model_filter <- function(formulae_list,
+                         m_variables){
+  
+  m_n_vars <- length(m_variables)
+  
   f <- formulae_list[ ! is.na(formulae_list)]
   
   tidy_strings <- function(x){
@@ -100,10 +104,10 @@ model_filter <- function(formulae_list){
   
   f_tidy <- lapply(f, tidy_strings)
   
-  var_matrix <- data.frame(matrix(nrow = n_vars,
-                                  ncol = n_vars))
-  colnames(var_matrix) <- variables
-  row.names(var_matrix) <- variables
+  var_matrix <- data.frame(matrix(nrow = m_n_vars,
+                                  ncol = m_n_vars))
+  colnames(var_matrix) <- m_variables
+  row.names(var_matrix) <- m_variables
   
   var_matrix[,] <- 0
   
@@ -155,7 +159,32 @@ x_not_in_y <- function(x, pattern){
   
 }
 
-
+#' Function to covert strings to fomula
+string2formula <- function(x){
+  
+  x <- as.list(x) %>% unlist()
+  
+  #' If there are any isolated variables, they need to be redefined as a circular formula.
+  #' This is how they need to be formatted for the phylopath::define_model_set function
+  if(any(x == names(x))){
+    
+    isolated_variables <- x[x == names(x)]
+    
+    for(i in 1: length(isolated_variables)){
+      
+      x[isolated_variables[i]] <- paste(isolated_variables[i], "~", isolated_variables[i])
+      
+    }
+    
+  }
+  
+  # Format as a list
+  as.list(x) %>%
+    
+    # Convert to formula
+    lapply(as.formula)
+  
+}
 
 
 #' ------------------------------------------
@@ -171,13 +200,12 @@ x_not_in_y <- function(x, pattern){
 
 get_all_models <- function(variable_list, 
                            exclusions = NULL, 
-                           #parallel = T,
+                           parallel = F,
                            max_variables_in_models = NULL,
-                           required_variables = NULL,
+                           required_variables = NULL, #' Note: this argument is functional when the max_variables_in_model 
+                                                      #' is less than length(variable_list). Might be worth having a check 
+                                                      #' or warning when this is not the case.
                            n_cores = NULL){
-  
-  # Need to update this later, argument currently not working
-  parallel = T
   
   testing = F
   
@@ -189,30 +217,81 @@ get_all_models <- function(variable_list,
                       "Dd44", 
                       "Ee55")
     
-    #exclusions = c("Aa11 ~ Bb22", 
-    #               "Dd44 ~ Bb22") 
+    exclusions = c("Aa11 ~ Bb22", 
+                   "Dd44 ~ Bb22") 
+    #exclusions = NULL
     parallel = F
-    max_variables_in_models = 4
+    #max_variables_in_models = 4
+    max_variables_in_models = NULL
+    required_variables = NULL 
     #required_variables = "Ee55"
-    n_cores = 4
+    #n_cores = 4
+    n_cores = NULL
+    
+  }
+  
+  
+  # If n_cores is set to more than 1 but parallel is not True, give a warning
+  if((!is.null(n_cores)) & parallel == F){
+    
+    
+    if(n_cores > 1){
+      
+      warning("n_cores can only be greater than 1 when parallel is set to T: running on a single thread")
+    
+    }
+      
+  }
+  
+  
+  #' Checking that n_cores argument is valid if parallel is true
+  if(parallel){
+    
+    total_system_threads <- detectCores(all.tests = FALSE, logical = TRUE)
+    
+    if(is.null(n_cores)){
+      
+      n_cores <- total_system_threads - 4
+      
+      #' If the system has less than 5 logical cores, and the number of cores is not specified, 
+      #' turn off parallel
+      if(n_cores < 2){
+        
+        parallel = F
+        
+        print("parallel set to TRUE, n_cores not defined, & system has less than 5 core: turning parallel off")
+        
+      }else{
+        
+        print(paste0("parallel set to TRUE, n_cores not defined: n_cores set to ", n_cores))
+        
+      }
+        
+    }else if(n_cores > total_system_threads){
+      
+      n_cores <- total_system_threads
+      
+      warning(paste0("n_cores argument set to a greater number of threads than available in system: setting n_cores to ", 
+                     n_cores))
+      
+    }else if(n_cores < 1){
+      
+      n_cores <- 1
+      
+      warning(paste0("n_cores argument set to less than 1: setting n_cores to ", 
+                     n_cores))
+      
+    }
     
   }
     
-  #' If the parallel arguemnt is true, set up a cluster
+  #' If the parallel argument is true, set up a cluster
   if(parallel){
     
     #' load parallelisation packages
     #require(doParallel)
     #require(parallel)
-    
-    #' If the number of cores to use are not defined,
-    #' use 4 less than the system has
-    if(is.null(n_cores)){
-      
-      n_cores <- detectCores(all.tests = FALSE, logical = TRUE) - 4
-      
-    }
-    
+
     #' Make cluster
     cl <- makeCluster(n_cores)
     registerDoParallel(cl)  
@@ -220,6 +299,7 @@ get_all_models <- function(variable_list,
     #' Load the packages within the cluster
     clusterEvalQ(cl, library("tidyverse"))
     clusterEvalQ(cl, library("gsubfn"))
+    
   }
   
   
@@ -227,12 +307,15 @@ get_all_models <- function(variable_list,
   #' Some basic checks of the variables supplied
   
   if(sum(duplicated(variable_list)) > 0){
+    
     stop("Each variable name must be unique")
     
   }else if(sum(grepl(" ", variable_list)) > 0){
+    
     stop("Variable names cannot contain spaces")
     
   } else if(sum(grepl("~", variable_list)) > 0){
+    
     stop("Variable names cannot contain the '~' symbol")
     
   }
@@ -422,14 +505,18 @@ get_all_models <- function(variable_list,
       combos_to_include <- parApply(cl = cl,
                                     X = all_formulae_combos, 
                                     MARGIN = 1, 
-                                    FUN = model_filter)
+                                    FUN = model_filter,
+                                    m_variables = variables)
       
       # This line below won't work on Windows machines
       #combos_to_include <- mclapply(alply(all_formulae_combos, .margins = 1), model_filter, mc.cores = n_cores - 2)
       
     }else{
       
-      combos_to_include <- apply(all_formulae_combos, 1, model_filter)
+      combos_to_include <- apply(X = all_formulae_combos, 
+                                 MARGIN = 1, 
+                                 FUN = model_filter,
+                                 m_variables = variables)
       
     }
 
@@ -527,53 +614,82 @@ get_all_models <- function(variable_list,
 #' Requires the columns to be named after each variable, which should 
 #' be the case if the get_all_models function is used
 
+
 strings_to_model_sets <- function(model_strings,
-                                  parallel = T,
+                                  parallel = F,
                                   n_cores = NULL){
   
-  #' ----------------
-  #' Defining sub-functions
-  #' 
-  #' ----
-  #' Function to covert strings to fomula
-  string2formula <- function(x){
+  testing <- F
+  
+  if(testing){
     
-    x <- as.list(x) %>% unlist()
+    model_strings <- get_all_models(variable_list = c("Aa11", 
+                                       "Bb22", 
+                                       #"Cc33", 
+                                       "Dd44", 
+                                       "Ee55"))
     
-    #' If there are any isolated variables, they need to be redefined as a circular formula.
-    #' This is how they need to be formatted for the phylopath::define_model_set function
-    if(any(x == names(x))){
-      
-      isolated_variables <- x[x == names(x)]
-      
-      for(i in 1: length(isolated_variables)){
-        
-        x[isolated_variables[i]] <- paste(isolated_variables[i], "~", isolated_variables[i])
-        
-      }
-      
-    }
-    
-    # Format as a list
-    as.list(x) %>%
-      
-      # Convert to formula
-      lapply(as.formula)
+    parallel = T
+    n_cores = NULL
     
   }
   
-  #' ------------
-  #' Defining variables
-  #' 
-  #' Taking the variable names from the data frame 
-  variables <- colnames(model_strings)
+  #' -----
+  #' Quick checks of arguments
   
-  #' ------------
-  #' Converting strings to formulae
-  #' NOTE: This step could be made more efficient. The for loop is slow.
-  #list_model_formulae <- apply(model_strings, MARGIN = 1, string2formula)
-  list_model_formulae <- list()
+  # If n_cores is set to more than 1 but parallel is not True, give a warning
+  if((!is.null(n_cores)) & parallel == F){
+    
+    
+    if(n_cores > 1){
+      
+      warning("n_cores can only be greater than 1 when parallel is set to T: running on a single thread")
+      
+    }
+    
+  }
   
+  
+  #' Checking that n_cores argument is valid if parallel is true
+  if(parallel){
+    
+    total_system_threads <- detectCores(all.tests = FALSE, logical = TRUE)
+    
+    if(is.null(n_cores)){
+      
+      n_cores <- total_system_threads - 4
+      
+      #' If the system has less than 5 logical cores, and the number of cores is not specified, 
+      #' turn off parallel
+      if(n_cores < 2){
+        
+        parallel = F
+        
+        print("parallel set to TRUE, n_cores not defined, & system has less than 5 core: turning parallel off")
+        
+      }else{
+        
+        print(paste0("parallel set to TRUE, n_cores not defined: n_cores set to ", n_cores))
+        
+      }
+      
+    }else if(n_cores > total_system_threads){
+      
+      n_cores <- total_system_threads
+      
+      warning(paste0("n_cores argument set to a greater number of threads than available in system: setting n_cores to ", 
+                     n_cores))
+      
+    }else if(n_cores < 1){
+      
+      n_cores <- 1
+      
+      warning(paste0("n_cores argument set to less than 1: setting n_cores to ", 
+                     n_cores))
+      
+    }
+    
+  }
   
   #' If the parallel argument is true, set up a cluster
   if(parallel){
@@ -581,15 +697,7 @@ strings_to_model_sets <- function(model_strings,
     #' load parallelisation packages
     #require(doParallel)
     #require(parallel)
-    
-    #' If the number of cores to use are not defined,
-    #' use 4 less than the system has
-    if(is.null(n_cores)){
-      
-      n_cores <- detectCores(all.tests = FALSE, logical = TRUE) - 4
-      
-    }
-    
+
     #' Make cluster
     cl <- makeCluster(n_cores)
     registerDoParallel(cl)  
@@ -597,6 +705,19 @@ strings_to_model_sets <- function(model_strings,
     #' Load the packages within the cluster
     clusterEvalQ(cl, library("tidyverse"))
   }
+  
+  
+  #' ------------
+  #' Defining variables
+  #' Taking the variable names from the data frame 
+  variables <- colnames(model_strings)
+  
+  
+  #' ------------
+  #' Converting strings to formulae
+  #' NOTE: This step could be made more efficient. The for loop is slow.
+  #list_model_formulae <- apply(model_strings, MARGIN = 1, string2formula)
+  list_model_formulae <- list()
   
   
   # List to become the list of model matrices
@@ -613,23 +734,31 @@ strings_to_model_sets <- function(model_strings,
     all_model_matrices <- parSapply(cl = cl,
                                     X = list_model_formulae,
                                     FUN = define_model_set)
+    
     #' stopping cluster
     stopCluster(cl)
     
   }else{
     
-    for(m in 1:nrow(model_strings)){
-      list_model_formulae[[m]] <- string2formula(model_strings[m,])
-    }
+    list_model_formulae <- apply(X = model_strings,
+                                  MARGIN = 1,
+                                  FUN = string2formula)
+    
+    all_model_matrices <- sapply(X = list_model_formulae,
+                                 FUN = define_model_set)
+    
+    #for(m in 1:nrow(model_strings)){
+    #  list_model_formulae[[m]] <- string2formula(model_strings[m,])
+    #}
     
     #' For loop to convert each string to a DAG matrix
     #' This part is also inefficient and could be improved. 
-    for(i in 1:length(list_model_formulae)){
-      
-      #' Defining a DAG matrix from the list of formulae in list_model_formulae
-      all_model_matrices[i] <- define_model_set(list_model_formulae[[i]])
-      
-    }
+    #for(i in 1:length(list_model_formulae)){
+    #  
+    #  #' Defining a DAG matrix from the list of formulae in list_model_formulae
+    #  all_model_matrices[i] <- define_model_set(list_model_formulae[[i]])
+    #  
+    #}
     
   }
   
