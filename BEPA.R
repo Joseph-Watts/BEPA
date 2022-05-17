@@ -1,6 +1,9 @@
 #' Brute-force Exploratory Path Analysis (BEPA)
+#' https://github.com/Joseph-Watts/BEPA
 #' 
-#' Joseph Watts - https://github.com/Joseph-Watts
+#' Author: Joseph Watts
+#' Email: joseph.watts@otago.ac.nz
+#' Website: www.josephwatts.org
 #' 
 #' The BEPA package contains functions to help perform exploratory path analysis in R.
 #' 
@@ -10,13 +13,20 @@
 #' 
 #' This package is written specifically for use with the phylopath package, which itself 
 #' is based on the phyloglm and phylolm packages.
-#' The functions should also be useable for exploratory path analyses more generally, but 
+#' The functions should also be usable for exploratory path analyses more generally, but 
 #' this has not been tested.
 #' 
-#' Currently this has only been tested on Windows 10. 
+#' Tested in R version 4.1.0 
+#' 
+#' THIS IS CURRENTLY A BETA VERSION 
+#' 
+#' It contains working notes and has lots of room for improvement.
+#' You are welcome to branch and improve it.
+#' 
+#' License: GNU General Public License v2.0
 #' 
 #' ------------------------------------------
-#' Working notes:
+#' Working notes to self:
 #' 1. The exclusion function could be made more general
 #' Would probably be good to be able to exclude a wider range of models in the future.
 #' For example, might want to exclude multiple predictors of a single variable, or 
@@ -182,13 +192,14 @@ string2formula <- function(x){
 
 
 get_all_models <- function(variable_list, 
-                           exclusions = NULL, 
-                           parallel = F,
-                           max_variables_in_models = NULL,
-                           required_variables = NULL, #' Note: this argument only functions when max_variables_in_model 
-                           #' is less than length(variable_list). Might be worth giving a warning when this arguments
-                           #' is specified but not actually doing anything.
-                           n_cores = NULL){
+   exclusions = NULL, 
+   parallel = F,
+   max_variables_in_models = NULL,
+   #' Note: the required_variables argument only functions when max_variables_in_model 
+   #' is less than length(variable_list). Might be worth giving a warning when this arguments
+   #' is specified but not actually doing anything.
+   required_variables = NULL, 
+   n_cores = NULL){
   
   testing = F
   
@@ -220,7 +231,8 @@ get_all_models <- function(variable_list,
     
     if(n_cores > 1){
       
-      warning("n_cores can only be greater than 1 when parallel is set to T: running on a single thread")
+      warning("n_cores can only be greater than 1 when parallel is set to T: 
+              running on a single thread")
       
     }
     
@@ -236,17 +248,19 @@ get_all_models <- function(variable_list,
       
       n_cores <- total_system_threads - 4
       
-      #' If the system has less than 5 logical cores, and the number of cores is not specified, 
-      #' turn off parallel
+      #' If the system has less than 5 logical cores, and the number of cores is 
+      #' not specified, turn off parallel
       if(n_cores < 2){
         
         parallel = F
         
-        print("parallel set to TRUE, n_cores not defined, & system has less than 5 core: turning parallel off")
+        print("parallel set to TRUE, n_cores not defined, & system has less than 
+              5 core: turning parallel off")
         
       }else{
         
-        print(paste0("parallel set to TRUE, n_cores not defined: n_cores set to ", n_cores))
+        print(paste0("parallel set to TRUE, n_cores not defined: n_cores set to ", 
+                     n_cores))
         
       }
       
@@ -520,7 +534,8 @@ get_all_models <- function(variable_list,
       
       i_col_index <- which(colnames(all_formulae_combos) == required_variables[i])
       
-      #' Index of all rows in which the required variable is not predicted by any other variables
+      #' Index of all rows in which the required variable is not predicted by 
+      #' any other variables
       i_not_response <- which(all_formulae_combos[, i_col_index] == required_variables[i])
       
       #' Index of all rows in which i is not a predictor variable
@@ -533,7 +548,8 @@ get_all_models <- function(variable_list,
       test <- all_formulae_combos[- i_not_response, ]
       test <- test[- i_not_predictor, ]
       
-      #' Drop rows if the required variable is neither a response variable or a predictor variable
+      #' Drop rows if the required variable is neither a response variable or a 
+      #' predictor variable
       i_drop <- intersect(i_not_response, i_not_predictor)
       
       all_formulae_combos <- all_formulae_combos[- i_drop, ]
@@ -634,7 +650,8 @@ strings_to_model_sets <- function(model_strings,
       
       n_cores <- total_system_threads - 4
       
-      #' If the system has less than 5 logical cores, and the number of cores is not specified, 
+      #' If the system has less than 5 logical cores, and the number of cores is 
+      #' not specified, 
       #' turn off parallel
       if(n_cores < 2){
         

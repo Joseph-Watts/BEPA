@@ -7,4 +7,10 @@ As the name suggests, this package is not efficient or elegant. As the number of
 
 Certain kinds of relationships can also be excluded. For example, you can specify all possible models structures except for those in which x predicts y.
 
+THIS IS CURRENTLY A BETA VERSION
+
+It contains working notes and has lots of room for improvement.
+You are welcome to branch and improve it.
+
+License: GNU General Public License v2.0
 
