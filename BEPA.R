@@ -25,6 +25,18 @@
 #' 
 #' License: GNU General Public License v2.0
 #' 
+#' -
+#' 
+#' General working notes:
+#' 1. To properly install phylopath you may need to install the downstream 
+#' dependency graph from Bioconductor:
+#' if (!require("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+#' BiocManager::install("graph")
+#' 
+#' This is the case if you are getting this error:
+#' "Error in loadNamespace(j <- imp[[1L]], c(lib.loc, .libPaths()), versionCheck = vI[[j]]) : 
+#' there is no package called ‘graph’"
+#' 
 #' ------------------------------------------
 #' Working notes to self:
 #' 1. The exclusion function could be made more general
@@ -43,8 +55,13 @@
 #' memory allocation required. Memory can be a bottle neck when a large (>5) number 
 #' of variables are included.
 #' 
-#' 8. To get around RAM constraints, it might be possible to run the function in sections,
+#' 4. To get around RAM constraints, it might be possible to run the function in sections,
 #' save the outputs to a drive, then at the end combine them together? 
+#' 
+#' 5. Probably need to make sure that it is clear that this code only handles basic
+#' formula structures without interactions etc. 
+#' Might also be worth adding in a set that validates the formula structure before
+#' actually doing anything with them.
 #' 
 #' Possible future directions:
 #' 1. Rather than having to the function anew every time, maybe it is worth saving an index
@@ -60,7 +77,7 @@ require(parallel)
 #' ----------------
 #' Defining sub-functions
 
-#' ----
+#' ---
 #' Alternative to gsubfn with arguments ordered for ease of use with apply
 alt_gsubfn <- function(x, 
                        pattern,
@@ -73,7 +90,7 @@ alt_gsubfn <- function(x,
   
 }
 
-#' ----
+#' ---
 #' Function to reformat and tidy formulae text strings
 tidy_strings <- function(x){
   x_items <- strsplit(x, " ") %>% unlist()
@@ -81,10 +98,186 @@ tidy_strings <- function(x){
     return()
 }
 
+
+
 #' ----
-#' Function to test whether formulae contain circularity
+#' Function to covert strings to fomula
+string2formula <- function(x){
+  
+  x <- as.list(x) %>% unlist()
+  
+  #' If there are any isolated variables, they need to be redefined as a circular formula.
+  #' This is how they need to be formatted for the phylopath::define_model_set function
+  if(any(x == names(x))){
+    
+    isolated_variables <- x[x == names(x)]
+    
+    for(i in 1: length(isolated_variables)){
+      
+      x[isolated_variables[i]] <- paste(isolated_variables[i], "~", isolated_variables[i])
+      
+    }
+    
+  }
+  
+  # Format as a list
+  as.list(x) %>%
+    
+  # Convert to formula
+  lapply(as.formula)
+  
+}
+
+
+#' ---
+#' Functions from the ggm package: https://rdrr.io/cran/ggm/
+#' Note: these functions are modified so that they return NULL if the
+#' matrix is cyclic, rather than an error. 
+#' This section of functions is covered by a GPL-2 CC licence. 
+
+transClos <-
+  function(amat) {
+    ### Transitive closure of the relation with adjacency matrix amat.
+    if (nrow(amat) == 1) {
+      return(amat)
+    }
+    A <- amat
+    diag(A) <- 1
+    repeat {
+      B <- sign(A %*% A)
+      if (all(B == A)) {
+        break
+      } else {
+        A <- B
+      }
+    }
+    diag(A) <- 0
+    A
+  }
+
+
+isAcyclic <-
+  function(amat, method = 2) {
+    ### Tests if the graph is acyclic.
+    if (method == 1) {
+      G <- graph.adjacency(amat)
+      return(max(clusters(G, mode = "strong")$csize) == 1)
+    } else if (method == 2) {
+      
+      B <- transClos(amat)
+      
+      l <- B[lower.tri(B)]
+      u <- t(B)[lower.tri(t(B))]
+      com <- (l & u)
+      return(all(!com))
+    } else {
+      stop("Wrong method.")
+    }
+  }
+
+topOrder <-
+  function(amat) {
+    ### Return the nodes in topological order (parents before children).
+    ### Translated from: Kevin Murphy's BNT.
+    if (!isAcyclic(amat)){
+      #stop("The graph is not acyclic!")
+      return(NULL)
+    }
+    n <- nrow(amat)
+    nod <- 1:n
+    indeg <- rep(0, n)
+    up <- !amat[lower.tri(amat)]
+    if (all(up)) {
+      return(nod)
+    }
+    zero.indeg <- c() #  a stack of nodes with no parents
+    for (i in nod) {
+      indeg[i] <- sum(amat[, i])
+      if (indeg[i] == 0) {
+        zero.indeg <- c(i, zero.indeg)
+      }
+    }
+    s <- 1
+    ord <- rep(0, n)
+    while (length(zero.indeg) > 0) {
+      v <- zero.indeg[1] #  pop v
+      zero.indeg <- zero.indeg[-1]
+      ord[s] <- v
+      s <- s + 1
+      cs <- nod[amat[v, ] == 1]
+      if (length(cs) == 0) next
+      for (j in 1:length(cs)) {
+        k <- cs[j]
+        indeg[k] <- indeg[k] - 1
+        if (indeg[k] == 0) {
+          zero.indeg <- c(k, zero.indeg)
+        } # push k
+      }
+    }
+    ord
+  }
+
+
+
+topSort <-
+  function(amat) {
+    ### Topological sort of the DAG with adjacency matrix amat.
+    ord <- topOrder(amat)
+    if(is.null(ord)){return(NULL)}
+    amat[ord, ord]
+  }
+
+
+basiSet <-
+  function(amat) {
+    ### Basis set of a DAG with adjacency matrix amat.
+    amat <- topSort(amat)
+    if(is.null(amat)){return(NULL)}
+    nod <- rownames(amat)
+    dv <- length(nod)
+    ind <- NULL
+    ## NOTE. This is correct if the adj mat is upper triangular.
+    for (r in 1:dv) {
+      for (s in r:dv) {
+        if ((amat[r, s] != 0) | (s == r)) {
+          next
+        } else {
+          ed <- nod[c(r, s)]
+          pa.r <- nod[amat[, r] == 1]
+          pa.s <- nod[amat[, s] == 1]
+          dsep <- union(pa.r, pa.s)
+          dsep <- setdiff(dsep, ed)
+          b <- list(c(ed, dsep))
+          ind <- c(ind, b)
+        }
+      }
+    }
+    ind
+  }
+
+
+
+
+
+
+#' ---
+#' Function to filter whether the formulae are suitable for phylopath
+
 model_filter <- function(formulae_list,
                          m_variables){
+  
+  
+  testing <- F
+  
+  if(testing){
+    
+    formulae_list <- c("a1 ~ b1 + c1",
+                       "c1 ~ d1",
+                       "d1 ~ a1",
+                       NA)
+    m_variables <- c("a1", "b1", "c1", "d1")
+    
+  }
   
   m_n_vars <- length(m_variables)
   
@@ -113,36 +306,19 @@ model_filter <- function(formulae_list,
     
   }
   
-  # By default the function will output False
-  output <- F
+  basiSet_output <- basiSet(as.matrix(var_matrix))
   
-  tryCatch({
-    
-    #' This is a bit of a hack, but uses the basiSet function in the ggm package 
-    #' to identify whether the var_matrix is acyclic (tests whether there is 
-    #' circularity in the predictor variable structure)
-    #' This function will fail when the matrix is not acyclic, and the tryCatch 
-    #' function is used to prevent this from stopping the function.
-    #' NOTE: If I wanted to develop this further, I could potentially find the 
-    #' source code the for basiSet function and adapt it for the current purposes. 
-    
-    f_test <- ggm::basiSet(as.matrix(var_matrix))
-    
-    if(length(f_test) > 1){
-      output <- T
-    }
-    
-  }, error=function(e){})
+  include <- !is.null(basiSet_output)
   
-  #    }
-  
-  #' This outputs TRUE if the model is acyclic and FALSE if the model contains 
-  #' circularity.
-  return(output)
+  #' If formulae are circular (and to be excluded) return F, otherwise return T
+  #' This function also includes NULL if there are other issues with the model
+  #' specification, such as fully connected models
+  return(include)
   
 }
 
 
+#' ---
 x_not_in_y <- function(x, pattern){
   
   grepl(pattern = pattern,
@@ -152,32 +328,7 @@ x_not_in_y <- function(x, pattern){
   
 }
 
-#' Function to covert strings to fomula
-string2formula <- function(x){
-  
-  x <- as.list(x) %>% unlist()
-  
-  #' If there are any isolated variables, they need to be redefined as a circular formula.
-  #' This is how they need to be formatted for the phylopath::define_model_set function
-  if(any(x == names(x))){
-    
-    isolated_variables <- x[x == names(x)]
-    
-    for(i in 1: length(isolated_variables)){
-      
-      x[isolated_variables[i]] <- paste(isolated_variables[i], "~", isolated_variables[i])
-      
-    }
-    
-  }
-  
-  # Format as a list
-  as.list(x) %>%
-    
-    # Convert to formula
-    lapply(as.formula)
-  
-}
+
 
 
 #' ------------------------------------------
@@ -199,31 +350,7 @@ get_all_models <- function(variable_list,
    #' is less than length(variable_list). Might be worth giving a warning when this arguments
    #' is specified but not actually doing anything.
    required_variables = NULL, 
-   n_cores = NULL){
-  
-  testing = F
-  
-  if(testing){
-    
-    variable_list = c("Aa11", 
-                      "Bb22", 
-                      #"Cc33", 
-                      "Dd44", 
-                      "Ee55")
-    
-    exclusions = c("Aa11 ~ Bb22", 
-                   "Dd44 ~ Bb22") 
-    #exclusions = NULL
-    parallel = F
-    #max_variables_in_models = 4
-    max_variables_in_models = NULL
-    required_variables = NULL 
-    #required_variables = "Ee55"
-    #n_cores = 4
-    n_cores = NULL
-    
-  }
-  
+   n_cores = NULL){  
   
   # If n_cores is set to more than 1 but parallel is not True, give a warning
   if((!is.null(n_cores)) & parallel == F){
@@ -282,18 +409,17 @@ get_all_models <- function(variable_list,
     
   }
   
-  #' If the parallel argument is true, set up a cluster
-  if(parallel){
-
-    #' Make cluster
-    cl <- makeCluster(n_cores)
-    registerDoParallel(cl)  
-    
-    #' Load the packages within the cluster
-    clusterEvalQ(cl, library("tidyverse"))
-    clusterEvalQ(cl, library("gsubfn"))
-    
-  }
+  #' #' If the parallel argument is true, set up a cluster
+  #' if(parallel){
+  #' 
+  #'   #' Make cluster
+  #'   cl <- makeCluster(n_cores)
+  #'   registerDoParallel(cl)  
+  #'   
+  #'   #' Load the packages within the cluster
+  #'   clusterEvalQ(cl, library("tidyverse", "gsubfn"))
+  #'   
+  #' }
   
   
   #' ----------------
@@ -477,13 +603,15 @@ get_all_models <- function(variable_list,
     i_var <- variables[i]
     
     # Select all formulae that predict i_var
-    i_formulae <- every_formulae[grepl(paste0("^", i_var), every_formulae)] %>% unlist()
+    i_formulae <- every_formulae[grepl(paste0("^", i_var), every_formulae)] %>% 
+      unlist()
     
     # Number of rows at the start of this iteration
     n_rows_start <- nrow(all_formulae_combos)
     
     # Duplicate each existing formulae by the number of formulae in which i_var is predicted
-    all_formulae_combos <- all_formulae_combos[rep(1:n_rows_start, each = length(i_formulae)),]
+    all_formulae_combos <- all_formulae_combos[rep(1:n_rows_start, 
+                                                   each = length(i_formulae)),]
     
     all_formulae_combos[,i_var] <- rep(i_formulae, times = n_rows_start)
     
@@ -491,9 +619,26 @@ get_all_models <- function(variable_list,
     
     if(parallel){
       
-      clusterExport(cl= cl, 
+      cl <- makeCluster(n_cores)
+
+      #'   #' Load the packages within the cluster
+      clusterEvalQ(cl, library("tidyverse", "gsubfn"))
+      
+      clusterExport(cl = cl, 
                     varlist = ls(), 
                     envir = environment())
+      
+      #' Come back to this and figure out a more efficient way to specifiy the
+      #' functions needed by the workers
+      clusterExport(cl, c("gsubfn",
+                          "alt_gsubfn", 
+                          "basiSet", 
+                          "isAcyclic", 
+                          "string2formula",
+                          "tidy_strings",
+                          "topOrder",
+                          "topSort",
+                          "transClos"))
       
       combos_to_include <- parApply(cl = cl,
                                     X = all_formulae_combos, 
@@ -509,7 +654,7 @@ get_all_models <- function(variable_list,
                                  m_variables = variables)
       
     }
-    
+
     all_formulae_combos <- all_formulae_combos[combos_to_include, ]
     
   }
@@ -620,7 +765,7 @@ strings_to_model_sets <- function(model_strings,
                                                       "Dd44", 
                                                       "Ee55"))
     
-    parallel = T
+    parallel = F
     n_cores = NULL
     
   }
@@ -648,9 +793,9 @@ strings_to_model_sets <- function(model_strings,
     
     if(is.null(n_cores)){
       
-      n_cores <- total_system_threads - 4
+      n_cores <- total_system_threads - 3
       
-      #' If the system has less than 5 logical cores, and the number of cores is 
+      #' If the system has less than 4 logical cores, and the number of cores is 
       #' not specified, 
       #' turn off parallel
       if(n_cores < 2){
